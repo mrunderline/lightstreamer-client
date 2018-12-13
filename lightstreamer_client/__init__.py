@@ -1,5 +1,3 @@
-#!/usr/bin/python
-
 #  Copyright (c) Lightstreamer Srl.
 #
 #  Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,46 +11,15 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
+#
+#  Modifications copyright (c) 2018 Wojciech Szlachta
 
-import sys
 import logging
 import threading
-import time
 import traceback
+from urllib.parse import (urlparse as parse_url, urljoin, urlencode)
+from urllib.request import urlopen as _urlopen
 
-# Modules aliasing and function utilities to support a
-# very coarse version differentiation between Python 2 and Python 3.
-PY3 = sys.version_info[0] == 3
-PY2 = sys.version_info[0] == 2
-
-if PY3:
-    from urllib.request import urlopen as _urlopen
-    from urllib.parse import (urlparse as parse_url, urljoin, urlencode)
-
-    def _url_encode(params):
-        return urlencode(params).encode("utf-8")
-
-    def _iteritems(d):
-        return iter(d.items())
-
-    def wait_for_input():
-        input("{0:-^80}\n".format("HIT CR TO UNSUBSCRIBE AND DISCONNECT FROM \
-LIGHTSTREAMER"))
-
-else:
-    from urllib import (urlopen as _urlopen, urlencode)
-    from urlparse import urlparse as parse_url
-    from urlparse import urljoin
-
-    def _url_encode(params):
-        return urlencode(params)
-
-    def _iteritems(d):
-        return d.iteritems()
-
-    def wait_for_input():
-        raw_input("{0:-^80}\n".format("HIT CR TO UNSUBSCRIBE AND DISCONNECT FROM \
-LIGHTSTREAMER"))
 CONNECTION_URL_PATH = "lightstreamer/create_session.txt"
 BIND_URL_PATH = "lightstreamer/bind_session.txt"
 CONTROL_URL_PATH = "lightstreamer/control.txt"
@@ -85,7 +52,8 @@ class Subscription(object):
         self.snapshot = "true"
         self._listeners = []
 
-    def _decode(self, value, last):
+    @staticmethod
+    def _decode(value, last):
         """Decode the field value according to
         Lightstreamer Text Protocol specifications.
         """
@@ -148,12 +116,11 @@ class LSClient(object):
         self._stream_connection_thread = None
         self._bind_counter = 0
 
-    def _encode_params(self, params):
+    @staticmethod
+    def _encode_params(params):
         """Encode the parameter for HTTP POST submissions, but
         only for non empty values..."""
-        return _url_encode(
-            dict([(k, v) for (k, v) in _iteritems(params) if v])
-        )
+        return urlencode(dict([(k, v) for (k, v) in iter(params.items()) if v])).encode("utf-8")
 
     def _call(self, base_url, url, params):
         """Open a network connection and performs HTTP Post
@@ -174,9 +141,8 @@ class LSClient(object):
             self._control_url = self._base_url
         else:
             parsed_custom_address = parse_url("//" + custom_address)
-            self._control_url = parsed_custom_address._replace(
-                scheme=self._base_url[0]
-            )
+            # noinspection PyProtectedMember
+            self._control_url = parsed_custom_address._replace(scheme=self._base_url[0])
 
     def _control(self, params):
         """Create a Control Connection to send control commands
@@ -202,11 +168,12 @@ class LSClient(object):
             self._base_url,
             CONNECTION_URL_PATH,
             {
-             "LS_op2": 'create',
-             "LS_cid": 'mgQkwtwdysogQz2BJ4Ji kOj2Bg',
-             "LS_adapter_set": self._adapter_set,
-             "LS_user": self._user,
-             "LS_password": self._password}
+                "LS_op2": 'create',
+                "LS_cid": 'mgQkwtwdysogQz2BJ4Ji kOj2Bg',
+                "LS_adapter_set": self._adapter_set,
+                "LS_user": self._user,
+                "LS_password": self._password
+            }
         )
         stream_line = self._read_from_stream()
         self._handle_stream(stream_line)
@@ -220,8 +187,8 @@ class LSClient(object):
             self._control_url,
             BIND_URL_PATH,
             {
-             "LS_session": self._session["SessionId"]
-             }
+                "LS_session": self._session["SessionId"]
+            }
         )
 
         self._bind_counter += 1
@@ -257,7 +224,7 @@ class LSClient(object):
         else:
             lines = self._stream_connection.readlines()
             lines.insert(0, stream_line)
-            log.error("Server response error: \n%s", join(lines))
+            log.error("Server response error: \n%s", "\n".join(lines))
             raise IOError()
 
     def _join(self):
@@ -274,7 +241,7 @@ class LSClient(object):
         """
         if self._stream_connection is not None:
             log.debug("Closing session to <%s>", self._base_url.geturl())
-            server_response = self._control({"LS_op": OP_DESTROY})
+            _ = self._control({"LS_op": OP_DESTROY})
             # There is no need to explicitly close the connection, since it is
             # handled by thread completion.
             self._join()
@@ -328,6 +295,7 @@ class LSClient(object):
         Subscription instance for further dispatching to its listeners.
         """
         log.debug("Received update message: <%s>", update_message)
+        # noinspection PyBroadException
         try:
             tok = update_message.split(',', 1)
             table, item = int(tok[0]), tok[1]
@@ -343,6 +311,7 @@ class LSClient(object):
         receive = True
         while receive:
             log.debug("Waiting for a new message")
+            # noinspection PyBroadException
             try:
                 message = self._read_from_stream()
                 log.debug("Received message: <%s>", message)
@@ -401,47 +370,3 @@ class LSClient(object):
         else:
             log.debug("Binding to this active session")
             self.bind()
-
-logging.basicConfig(stream=sys.stdout, format='%(asctime)s %(levelname)-7s ' +
-                    '%(threadName)-15s %(message)s', level=logging.DEBUG)
-
-# Establishing a new connection to Lightstreamer Server
-print("Starting connection")
-# lightstreamer_client = LSClient("http://localhost:8080", "DEMO")
-lightstreamer_client = LSClient("http://push.lightstreamer.com", "DEMO")
-try:
-    lightstreamer_client.connect()
-except Exception as e:
-    print("Unable to connect to Lightstreamer Server")
-    print(traceback.format_exc())
-    sys.exit(1)
-
-
-# Making a new Subscription in MERGE mode
-subscription = Subscription(
-    mode="MERGE",
-    items=["item1", "item2", "item3", "item4",
-           "item5", "item6", "item7", "item8",
-           "item9", "item10", "item11", "item12"],
-    fields=["stock_name", "last_price", "time", "bid", "ask"],
-    adapter="QUOTE_ADAPTER")
-
-
-# A simple function acting as a Subscription listener
-def on_item_update(item_update):
-    print("{stock_name:<19}: Last{last_price:>6} - Time {time:<8} - "
-          "Bid {bid:>5} - Ask {ask:>5}".format(**item_update["values"]))
-
-# Adding the "on_item_update" function to Subscription
-subscription.addlistener(on_item_update)
-
-# Registering the Subscription
-sub_key = lightstreamer_client.subscribe(subscription)
-
-wait_for_input()
-
-# Unsubscribing from Lightstreamer by using the subscription key
-lightstreamer_client.unsubscribe(sub_key)
-
-# Disconnecting
-lightstreamer_client.disconnect()
