@@ -4,6 +4,14 @@
 
 ## Installation
 
+To use most recent release:
+
+```bash
+pip install lightstreamer-client
+```
+
+To use current master branch:
+
 ```bash
 pip install git+https://github.com/wjszlachta/lightstreamer-client.git
 ```
