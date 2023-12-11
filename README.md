@@ -4,14 +4,11 @@
 
 ## Installation
 
-To use most recent release:
-
-```bash
-pip install lightstreamer-client
-```
-
 To use current master branch:
 
 ```bash
-pip install git+https://github.com/wjszlachta/lightstreamer-client.git
+pip install git+https://github.com/mrunderline/lightstreamer-client.git
 ```
+
+## Note
+Tested and reformated espesially for `tadbir.com` push server, but should be fine for other use cases too :)
