@@ -40,21 +40,22 @@ OK_CMD = "OK"
 log = logging.getLogger()
 
 
-class LightstreamerSubscription(object):
-    """Represents a Subscription to be submitted to a Lightstreamer Server."""
+class LightStreamerSubscription:
+    """Represents a Subscription to be submitted to a Light Streamer Server."""
 
-    def __init__(self, mode, items, fields, adapter=''):
+    def __init__(self, mode, items, fields, adapter='', snapshot=True, notify_new_values=False):
         self.item_names = items
         self._items_map = {}
         self.field_names = fields
         self.adapter = adapter
         self.mode = mode
-        self.snapshot = "true"
+        self.snapshot = snapshot
         self._listeners = []
+        self.notify_new_values = notify_new_values
 
     @staticmethod
     def _decode(value, last):
-        """Decode the field value according to Lightstreamer Text Protocol specifications."""
+        """Decode the field value according to Light Streamer Text Protocol specifications."""
 
         if value == "$":
             return u''
@@ -67,38 +68,57 @@ class LightstreamerSubscription(object):
 
         return value
 
-    def addlistener(self, listener):
+    def add_listener(self, listener):
         self._listeners.append(listener)
 
-    def notifyupdate(self, item_line):
-        """Invoked by LSClient each time Lightstreamer Server pushes a new item event."""
+    def notify_update(self, item_line):
+        """Invoked by LSClient each time Light Streamer Server pushes a new item event."""
 
-        # tokenize the item line as sent by Lightstreamer
-        toks = item_line.rstrip('\r\n').split('|')
-        undecoded_item = dict(list(zip(self.field_names, toks[1:])))
+        # tokenize the item line as sent by Light Streamer
+        tokens = item_line.rstrip('\r\n').split('|')
+        item_pos = int(tokens[0])
+        item_name = self.item_names[item_pos - 1]
 
-        # retrieve the previous item stored into the map, if present, otherwise create a new empty dict
-        item_pos = int(toks[0])
-        curr_item = self._items_map.get(item_pos, {})
-        # update the map with new values, merging with the previous ones if any
-        self._items_map[item_pos] = dict([(k, self._decode(v, curr_item.get(k))) for k, v in list(undecoded_item.items())])
+        if self.notify_new_values:
+            # undecode just new keys
+            undecoded_item = dict(list((k, v) for k, v in list(zip(self.field_names, tokens[1:])) if v != ''))
+            item_values = undecoded_item
+
+        else:
+            # undecode new keys and set empty string for not send tokens
+            undecoded_item = dict(list(zip(self.field_names, tokens[1:])))
+
+            # retrieve the previous item stored into the map, if present, otherwise create a new empty dict
+            curr_item = self._items_map.get(item_pos, {})
+
+            # update the map with new values, merging with the previous ones if any
+            self._items_map[item_pos] = dict(
+                [
+                    (k, self._decode(v, curr_item.get(k)))
+                    for k, v in list(undecoded_item.items())
+                ]
+            )
+            item_values = self._items_map[item_pos]
+
         # make an item info as a new event to be passed to listeners
-        item_info = {'pos': item_pos,
-                     'name': self.item_names[item_pos - 1],
-                     'values': self._items_map[item_pos]}
+        item_info = {
+            'pos': item_pos,
+            'name': item_name,
+            'values': item_values,
+        }
 
         # update each registered listener with new event
         for on_item_update in self._listeners:
             on_item_update(item_info)
 
 
-class LightstreamerClient(object):
-    """Manages the communication with Lightstreamer Server."""
+class LightStreamerClient:
+    """Manages the communication with Light Streamer Server."""
 
-    def __init__(self, lightstreamer_username, lightstreamer_password, lightstreamer_url, adapter_set=''):
-        self._lightstreamer_username = lightstreamer_username
-        self._lightstreamer_password = lightstreamer_password
-        self._lightstreamer_url = parse_url(lightstreamer_url)
+    def __init__(self, ls_username, ls_token, ls_url, adapter_set=''):
+        self._ls_username = ls_username
+        self._ls_token = ls_token
+        self._ls_url = parse_url(ls_url)
         self._adapter_set = adapter_set
         self._session = {}
         self._subscriptions = {}
@@ -109,7 +129,7 @@ class LightstreamerClient(object):
 
     @staticmethod
     def _encode_params(params):
-        """Encode the parameter for HTTP POST submissions, but only for non empty values."""
+        """Encode the parameter for HTTP POST submissions, but only for non-empty values."""
 
         return urlencode(dict([(k, v) for (k, v) in iter(params.items()) if v])).encode("utf-8")
 
@@ -123,14 +143,15 @@ class LightstreamerClient(object):
         return _urlopen(url, data=body)
 
     def _set_control_link_url(self, custom_address=None):
-        """Set the address to use for the Control Connection in such cases where Lightstreamer is behind a Load Balancer."""
+        """Set the address to use for the Control Connection in such cases where Light Streamer is behind a Load
+        Balancer."""
 
         if custom_address is None:
-            self._control_url = self._lightstreamer_url
+            self._control_url = self._ls_url
         else:
             parsed_custom_address = parse_url("//" + custom_address)
             # noinspection PyProtectedMember
-            self._control_url = parsed_custom_address._replace(scheme=self._lightstreamer_url[0])
+            self._control_url = parsed_custom_address._replace(scheme=self._ls_url[0])
 
     def _control(self, params):
         """Create a Control Connection to send control commands that manage the content of Stream Connection."""
@@ -148,14 +169,18 @@ class LightstreamerClient(object):
         return line
 
     def connect(self):
-        """Establish a connection to Lightstreamer Server to create a new session."""
+        """Establish a connection to Light Streamer Server to create a new session."""
 
-        log.debug("Opening a new session to <%s>", self._lightstreamer_url.geturl())
-        self._stream_connection = self._call(self._lightstreamer_url, CONNECTION_URL_PATH, {"LS_op2": 'create',
-                                                                                            "LS_cid": 'mgQkwtwdysogQz2BJ4Ji kOj2Bg',
-                                                                                            "LS_adapter_set": self._adapter_set,
-                                                                                            "LS_user": self._lightstreamer_username,
-                                                                                            "LS_password": self._lightstreamer_password})
+        log.debug("Opening a new session to <%s>", self._ls_url.geturl())
+        self._stream_connection = self._call(
+            self._ls_url,
+            CONNECTION_URL_PATH,
+            {
+                "LS_adapter_set": self._adapter_set,
+                "LS_user": self._ls_username,
+                "LS_password": self._ls_token
+            }
+        )
         stream_line = self._read_from_stream()
         self._handle_stream(stream_line)
 
@@ -163,7 +188,13 @@ class LightstreamerClient(object):
         """Replace a completely consumed connection in listening for an active Session."""
 
         log.debug("Binding to <%s>", self._control_url.geturl())
-        self._stream_connection = self._call(self._control_url, BIND_URL_PATH, {"LS_session": self._session["SessionId"]})
+        self._stream_connection = self._call(
+            self._control_url,
+            BIND_URL_PATH,
+            {
+                "LS_session": self._session["SessionId"]
+            }
+        )
 
         self._bind_counter += 1
         stream_line = self._read_from_stream()
@@ -172,10 +203,10 @@ class LightstreamerClient(object):
 
     def _handle_stream(self, stream_line):
         if stream_line == OK_CMD:
-            log.info("Successfully connected to <%s>", self._lightstreamer_url.geturl())
+            log.info("Successfully connected to <%s>", self._ls_url.geturl())
             log.debug("Starting to handling real-time stream")
             # parsing session
-            while 1:
+            while True:
                 next_stream_line = self._read_from_stream()
                 if next_stream_line:
                     session_key, session_value = next_stream_line.split(":", 1)
@@ -186,11 +217,15 @@ class LightstreamerClient(object):
             # setup of the control link url
             self._set_control_link_url(self._session.get("ControlAddress"))
 
-            # start a new thread to handle real time updates sent by Lightstreamer Server on the stream connection
-            self._stream_connection_thread = threading.Thread(name="StreamThread-{0}".format(self._bind_counter), target=self._receive)
-            self._stream_connection_thread.setDaemon(True)
+            # start a new thread to handle real time updates sent by Light Streamer Server on the stream connection
+            self._stream_connection_thread = threading.Thread(
+                name="StreamThread-{0}".format(self._bind_counter),
+                target=self._receive
+            )
+            self._stream_connection_thread.daemon = True
             self._stream_connection_thread.start()
             log.info("Started handling of real-time stream")
+
         else:
             lines = self._stream_connection.readlines()
             lines.insert(0, stream_line)
@@ -210,16 +245,16 @@ class LightstreamerClient(object):
         """Request to close the session previously opened with the connect() invocation."""
 
         if self._stream_connection is not None:
-            log.debug("Closing session to <%s>", self._lightstreamer_url.geturl())
+            log.debug("Closing session to <%s>", self._ls_url.geturl())
             _ = self._control({"LS_op": OP_DESTROY})
             # there is no need to explicitly close the connection, since it is handled by thread completion
             self._join()
-            log.info("Closed session to <%s>", self._lightstreamer_url.geturl())
+            log.info("Closed session to <%s>", self._ls_url.geturl())
         else:
-            log.warning("No connection to Lightstreamer")
+            log.warning("No connection to Light Streamer")
 
     def subscribe(self, subscription):
-        """"Perform a subscription request to Lightstreamer Server."""
+        """Perform a subscription request to Light Streamer Server."""
 
         # register the Subscription with a new subscription key
         self._current_subscription_key += 1
@@ -227,36 +262,59 @@ class LightstreamerClient(object):
 
         # send the control request to perform the subscription
         log.debug("Making a new subscription request")
-        server_response = self._control({"LS_Table": self._current_subscription_key,
-                                         "LS_op": OP_ADD,
-                                         "LS_data_adapter": subscription.adapter,
-                                         "LS_mode": subscription.mode,
-                                         "LS_schema": " ".join(subscription.field_names),
-                                         "LS_id": " ".join(subscription.item_names)})
+        server_response = self._control({
+            "LS_Table": self._current_subscription_key,
+            "LS_op": OP_ADD,
+            "LS_snapshot": subscription.snapshot,
+            "LS_data_adapter": subscription.adapter,
+            "LS_mode": subscription.mode,
+            "LS_schema": " ".join(subscription.field_names),
+            "LS_id": " ".join(subscription.item_names)
+        })
         if server_response == OK_CMD:
             log.info("Successfully subscribed ")
         else:
             log.warning("Subscription error")
         return self._current_subscription_key
 
-    def unsubscribe(self, subcription_key):
+    def unsubscribe(self, subscription_key):
         """Unregister the Subscription associated to the specified subscription_key."""
 
         log.debug("Making an unsubscription request")
-        if subcription_key in self._subscriptions:
-            server_response = self._control({"LS_Table": subcription_key,
-                                             "LS_op": OP_DELETE})
+        if subscription_key in self._subscriptions:
+            server_response = self._control({
+                "LS_Table": subscription_key,
+                "LS_op": OP_DELETE
+            })
 
             if server_response == OK_CMD:
-                del self._subscriptions[subcription_key]
+                del self._subscriptions[subscription_key]
                 log.info("Successfully unsubscribed")
             else:
                 log.warning("Unsubscription error")
         else:
-            log.warning("No subscription key %s found!", subcription_key)
+            log.warning("No subscription key %s found!", subscription_key)
+
+    def unsubscribe_all(self):
+        """Unregister all Subscriptions."""
+
+        log.debug("Making unsubscription requests for all")
+        for subscription_key in self._subscriptions.copy().keys():
+            server_response = self._control({
+                "LS_Table": subscription_key,
+                "LS_op": OP_DELETE
+            })
+
+            if server_response == OK_CMD:
+                del self._subscriptions[subscription_key]
+                log.info("Successfully unsubscribed from " + str(subscription_key))
+            else:
+                log.warning("Unsubscription error")
+                log.warning("Server response: " + str(server_response))
 
     def _forward_update_message(self, update_message):
-        """Forwards the real time update to the relative Subscription instance for further dispatching to its listeners."""
+        """Forwards the real time update to the relative Subscription instance for further dispatching to its
+        listeners."""
 
         log.debug("Received update message: <%s>", update_message)
         # noinspection PyBroadException
@@ -264,7 +322,7 @@ class LightstreamerClient(object):
             tok = update_message.split(',', 1)
             table, item = int(tok[0]), tok[1]
             if table in self._subscriptions:
-                self._subscriptions[table].notifyupdate(item)
+                self._subscriptions[table].notify_update(item)
             else:
                 log.warning("No subscription found!")
         except Exception:
@@ -297,19 +355,21 @@ class LightstreamerClient(object):
                 receive = False
                 log.error("ERROR")
             elif message.startswith(LOOP_CMD):
-                # terminate the the receiving loop on LOOP message
+                # terminate the receiving loop on LOOP message
                 # a complete implementation should proceed with a rebind of the session
                 log.debug("LOOP")
                 receive = False
                 rebind = True
             elif message.startswith(SYNC_ERROR_CMD):
                 # terminate the receiving loop on SYNC ERROR message
-                # a complete implementation should create a new session and re-subscribe to all the old items and relative fields
+                # a complete implementation should create a new session and re-subscribe to all the old items and
+                # relative fields
                 log.error("SYNC ERROR")
                 receive = False
             elif message.startswith(END_CMD):
                 # terminate the receiving loop on END message
-                # the session has been forcibly closed on the server side a complete implementation should handle the "cause_code" if present
+                # the session has been forcibly closed on the server side a complete implementation should handle the
+                # "cause_code" if present
                 log.info("Connection closed by the server")
                 receive = False
             elif message.startswith("Preamble"):
@@ -319,7 +379,7 @@ class LightstreamerClient(object):
                 self._forward_update_message(message)
 
         if not rebind:
-            log.debug("No rebind to <%s>, clearing internal session data", self._lightstreamer_url.geturl())
+            log.debug("No rebind to <%s>, clearing internal session data", self._ls_url.geturl())
             # clear internal data structures for session and subscriptions management
             self._stream_connection = None
             self._session.clear()
