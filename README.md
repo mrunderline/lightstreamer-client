@@ -11,4 +11,4 @@ pip install git+https://github.com/mrunderline/lightstreamer-client.git
 ```
 
 ## Note
-Tested and reformated espesially for `tadbir.com` push server, but should be fine for other use cases too :)
+Tested and reformatted especially for `tadbir.com` push server, but should be fine for other use cases too :)
