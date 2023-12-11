@@ -12,7 +12,7 @@ setup(
     description='Lightstreamer Python client',
     long_description=long_description,
     long_description_content_type='text/markdown',
-    url='https://github.com/wjszlachta/lightstreamer-client',
+    url='https://github.com/mrunderline/lightstreamer-client',
     author='Wojciech Szlachta',
     author_email='wojciech@szlachta.net',
     classifiers=[
@@ -24,8 +24,8 @@ setup(
     ],
     keywords='lightstreamer',
     project_urls={
-        'Bug Reports': 'https://github.com/wjszlachta/lightstreamer-client/issues',
-        'Source': 'https://github.com/wjszlachta/lightstreamer-client'
+        'Bug Reports': 'https://github.com/mrunderline/lightstreamer-client/issues',
+        'Source': 'https://github.com/mrunderline/lightstreamer-client'
     },
 
     packages=find_packages(exclude=['contrib', 'docs', 'tests']),
